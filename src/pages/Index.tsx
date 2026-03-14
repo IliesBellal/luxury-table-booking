@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { fr } from "date-fns/locale";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft } from "lucide-react";
@@ -11,6 +12,7 @@ import { Loader } from "@/components/Loader";
 import { restaurantData } from "@/data/restaurant";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
+import { createBooking } from "@/lib/api";
 
 const { open_days, maximum_party_size, merchant } = restaurantData.data;
 
