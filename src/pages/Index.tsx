@@ -54,6 +54,7 @@ const pageVariants = {
 };
 
 export default function Index() {
+  const navigate = useNavigate();
   const [step, setStep] = useState<Step>(1);
   const [guests, setGuests] = useState(2);
   const [date, setDate] = useState<Date | undefined>(undefined);
