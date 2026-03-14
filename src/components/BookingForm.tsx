@@ -17,13 +17,13 @@ export interface BookingFormData {
   notes: string;
 }
 
-export function BookingForm({ onSubmit, isSubmitting }: BookingFormProps) {
+export function BookingForm({ onSubmit, isSubmitting, defaultValues }: BookingFormProps) {
   const [form, setForm] = useState<BookingFormData>({
-    firstName: "",
-    lastName: "",
-    email: "",
-    phone: "",
-    notes: "",
+    firstName: defaultValues?.firstName ?? "",
+    lastName: defaultValues?.lastName ?? "",
+    email: defaultValues?.email ?? "",
+    phone: defaultValues?.phone ?? "",
+    notes: defaultValues?.notes ?? "",
   });
   const [errors, setErrors] = useState<Partial<Record<keyof BookingFormData, string>>>({});
 
