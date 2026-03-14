@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 interface BookingFormProps {
   onSubmit: (data: BookingFormData) => void;
   isSubmitting?: boolean;
+  defaultValues?: Partial<BookingFormData>;
 }
 
 export interface BookingFormData {
