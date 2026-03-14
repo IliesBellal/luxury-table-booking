@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { fr } from "date-fns/locale";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft } from "lucide-react";
@@ -11,6 +12,7 @@ import { Loader } from "@/components/Loader";
 import { restaurantData } from "@/data/restaurant";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
+import { createBooking } from "@/lib/api";
 
 const { open_days, maximum_party_size, merchant } = restaurantData.data;
 
@@ -52,6 +54,7 @@ const pageVariants = {
 };
 
 export default function Index() {
+  const navigate = useNavigate();
   const [step, setStep] = useState<Step>(1);
   const [guests, setGuests] = useState(2);
   const [date, setDate] = useState<Date | undefined>(undefined);
@@ -88,13 +91,40 @@ export default function Index() {
   }, [step]);
 
   const handleSubmitBooking = useCallback(
-    (data: BookingFormData) => {
-      toast({
-        title: "Réservation confirmée !",
-        description: `${data.firstName} ${data.lastName} — ${guests} pers. le ${date?.toLocaleDateString("fr-FR", { day: "numeric", month: "long" })} à ${selectedSlot}`,
-      });
+    async (data: BookingFormData) => {
+      if (!date || !selectedSlot) return;
+      setLoading(true);
+      try {
+        const [hours, minutes] = selectedSlot.split(":").map(Number);
+        const bookingDate = new Date(date);
+        bookingDate.setHours(hours, minutes, 0, 0);
+        const startDateUnix = Math.floor(bookingDate.getTime() / 1000);
+
+        const result = await createBooking({
+          customer: {
+            customer_first_name: data.firstName,
+            customer_last_name: data.lastName,
+            customer_email: data.email,
+            customer_tel: data.phone,
+          },
+          booking: {
+            start_date: startDateUnix,
+            party_size: guests,
+            comment: data.notes,
+          },
+        });
+        navigate(`/reservation/${result.booking_number}`);
+      } catch (e: any) {
+        toast({
+          title: "Erreur",
+          description: e.message,
+          variant: "destructive",
+        });
+      } finally {
+        setLoading(false);
+      }
     },
-    [guests, date, selectedSlot]
+    [guests, date, selectedSlot, navigate]
   );
 
   const formattedDate = date?.toLocaleDateString("fr-FR", {
