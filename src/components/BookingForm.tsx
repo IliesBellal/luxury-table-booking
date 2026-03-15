@@ -8,6 +8,7 @@ interface BookingFormProps {
   onSubmit: (data: BookingFormData) => void;
   isSubmitting?: boolean;
   defaultValues?: Partial<BookingFormData>;
+  submitLabel?: string;
 }
 
 export interface BookingFormData {
@@ -18,7 +19,7 @@ export interface BookingFormData {
   notes: string;
 }
 
-export function BookingForm({ onSubmit, isSubmitting, defaultValues }: BookingFormProps) {
+export function BookingForm({ onSubmit, isSubmitting, defaultValues, submitLabel = "Confirmer la réservation" }: BookingFormProps) {
   const [form, setForm] = useState<BookingFormData>({
     firstName: defaultValues?.firstName ?? "",
     lastName: defaultValues?.lastName ?? "",
@@ -117,7 +118,7 @@ export function BookingForm({ onSubmit, isSubmitting, defaultValues }: BookingFo
           isSubmitting && "opacity-60 cursor-not-allowed"
         )}
       >
-        {isSubmitting ? "Confirmation…" : "Confirmer la réservation"}
+        {isSubmitting ? "Enregistrement…" : submitLabel}
       </button>
     </motion.form>
   );
