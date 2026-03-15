@@ -25,7 +25,7 @@ export interface BookingDetail {
   comment: string;
   cancelable_by_customer: boolean;
   cancel_booking_limit_offset_hours: number;
-  status: "confirmed" | "cancelled";
+  status: "confirmed" | "cancelled" | "pending_approval";
 }
 
 // Simulated in-memory store for mock
