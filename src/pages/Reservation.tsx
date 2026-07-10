@@ -16,6 +16,8 @@ import {
   Ban,
   Timer,
   Loader2,
+  CalendarPlus,
+  Download,
 } from "lucide-react";
 import { fr } from "date-fns/locale";
 import { RestaurantHeader } from "@/components/RestaurantHeader";
@@ -50,6 +52,7 @@ import {
   type BookingPublic,
   type BookingStatus,
 } from "@/lib/api";
+import { downloadIcs, googleCalendarUrl } from "@/lib/calendar";
 import { forgetBooking } from "@/lib/storage";
 
 interface StatusScreen {
@@ -407,6 +410,37 @@ export default function Reservation() {
                 </div>
               )}
             </div>
+
+            {/* Ajouter au calendrier */}
+            {(booking.status === "confirmed" || booking.status === "pending") && (
+              <div className="rounded-xl bg-card p-4 shadow-sm space-y-3">
+                <div className="flex items-center gap-2">
+                  <CalendarPlus className="h-4 w-4 text-muted-foreground" />
+                  <p className="text-sm font-semibold text-foreground">Ajouter à mon agenda</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                    onClick={() =>
+                      window.open(googleCalendarUrl(booking), "_blank", "noopener,noreferrer")
+                    }
+                  >
+                    Google Agenda
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => downloadIcs(booking)}
+                  >
+                    <Download className="h-3.5 w-3.5 mr-1.5" />
+                    Apple / Outlook
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {/* Délai dépassé / non modifiable */}
             {showLimitMessage && (
