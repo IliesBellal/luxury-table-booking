@@ -96,7 +96,7 @@ export default function Index() {
       createBooking(
         slug,
         { date: dateKey!, time: selectedSlot!, partySize: guests, comment: form.notes },
-        { name: form.name, email: form.email, phone: form.phone },
+        { firstName: form.firstName, lastName: form.lastName, email: form.email, phone: form.phone },
         idempotencyKey.current
       ),
     onSuccess: ({ booking, warning }) => {

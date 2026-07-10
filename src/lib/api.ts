@@ -249,7 +249,8 @@ export interface BookingInput {
 }
 
 export interface CustomerInput {
-  name: string;
+  firstName: string;
+  lastName: string;
   email: string;
   phone: string;
 }
@@ -276,7 +277,8 @@ export async function createBooking(
         comment: input.comment,
       },
       customer: {
-        customer_name: customer.name,
+        customer_first_name: customer.firstName,
+        customer_last_name: customer.lastName,
         customer_email: customer.email,
         customer_tel: customer.phone,
       },

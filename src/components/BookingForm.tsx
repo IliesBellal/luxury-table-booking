@@ -13,7 +13,8 @@ interface BookingFormProps {
 }
 
 export interface BookingFormData {
-  name: string;
+  firstName: string;
+  lastName: string;
   email: string;
   phone: string;
   notes: string;
@@ -26,7 +27,8 @@ export function BookingForm({
   submitLabel = "Confirmer la réservation",
 }: BookingFormProps) {
   const [form, setForm] = useState<BookingFormData>({
-    name: defaultValues?.name ?? "",
+    firstName: defaultValues?.firstName ?? "",
+    lastName: defaultValues?.lastName ?? "",
     email: defaultValues?.email ?? "",
     phone: defaultValues?.phone ?? "",
     notes: defaultValues?.notes ?? "",
@@ -35,7 +37,8 @@ export function BookingForm({
 
   function validate(): boolean {
     const e: typeof errors = {};
-    if (!form.name.trim()) e.name = "Requis";
+    if (!form.firstName.trim()) e.firstName = "Requis";
+    if (!form.lastName.trim()) e.lastName = "Requis";
     if (!form.email.trim()) e.email = "Requis";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) e.email = "Email invalide";
     if (!form.phone.trim()) e.phone = "Requis";
@@ -47,7 +50,8 @@ export function BookingForm({
   function handleSubmit(ev: React.FormEvent) {
     ev.preventDefault();
     if (isSubmitting) return;
-    if (validate()) onSubmit({ ...form, name: form.name.trim() });
+    if (validate())
+      onSubmit({ ...form, firstName: form.firstName.trim(), lastName: form.lastName.trim() });
   }
 
   function update(field: keyof BookingFormData, value: string) {
@@ -64,15 +68,26 @@ export function BookingForm({
       onSubmit={handleSubmit}
       className="space-y-5"
     >
-      <Field label="Nom complet" error={errors.name}>
-        <Input
-          placeholder="Jean Dupont"
-          autoComplete="name"
-          value={form.name}
-          onChange={(e) => update("name", e.target.value)}
-          maxLength={200}
-        />
-      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Prénom" error={errors.firstName}>
+          <Input
+            placeholder="Jean"
+            autoComplete="given-name"
+            value={form.firstName}
+            onChange={(e) => update("firstName", e.target.value)}
+            maxLength={100}
+          />
+        </Field>
+        <Field label="Nom" error={errors.lastName}>
+          <Input
+            placeholder="Dupont"
+            autoComplete="family-name"
+            value={form.lastName}
+            onChange={(e) => update("lastName", e.target.value)}
+            maxLength={100}
+          />
+        </Field>
+      </div>
 
       <Field label="Email" error={errors.email}>
         <Input
