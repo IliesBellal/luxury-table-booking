@@ -2,7 +2,10 @@
 // Toutes les réponses sont enveloppées { id, data } ; le succès/l'échec est
 // porté par data.status (métier), pas par le code HTTP.
 
-const BASE_URL = ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "").replace(/\/+$/, "");
+const DEFAULT_API_BASE_URL = "https://welloresto-api-staging.onrender.com";
+const BASE_URL = (
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? DEFAULT_API_BASE_URL
+).replace(/\/+$/, "");
 
 // ---------------------------------------------------------------------------
 // Types (miroir des modèles publics de l'API)
