@@ -371,6 +371,12 @@ export function toDateKey(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
+/** Parse un timestamp API "YYYY-MM-DD HH:MM:SS" exprimé en UTC (waitlist) */
+export function parseUtcTimestamp(value: string): Date | null {
+  const date = new Date(value.replace(" ", "T") + "Z");
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 /**
  * Décompose date_from (RFC3339) en clé de jour et heure locales du
  * restaurant — utile pour pré-remplir le calendrier et les créneaux.

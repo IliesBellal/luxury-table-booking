@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fr } from "date-fns/locale";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, SearchX } from "lucide-react";
+import { ArrowLeft, Hourglass, SearchX } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { RestaurantHeader } from "@/components/RestaurantHeader";
 import { GuestSelector } from "@/components/GuestSelector";
 import { TimeSlotSelector } from "@/components/TimeSlotSelector";
 import { BookingForm, type BookingFormData } from "@/components/BookingForm";
+import { WaitlistSheet } from "@/components/WaitlistSheet";
 import { Loader } from "@/components/Loader";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
@@ -22,7 +23,7 @@ import {
   toDateKey,
   type ApiSlot,
 } from "@/lib/api";
-import { rememberBooking } from "@/lib/storage";
+import { getWaitlistToken, rememberBooking } from "@/lib/storage";
 
 type Step = 1 | 2 | 3;
 
@@ -43,7 +44,9 @@ export default function Index() {
   const [guests, setGuests] = useState(2);
   const [date, setDate] = useState<Date | undefined>(undefined);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  const [waitlistOpen, setWaitlistOpen] = useState(false);
   const idempotencyKey = useRef<string>("");
+  const existingWaitlistToken = useMemo(() => getWaitlistToken(slug), [slug]);
 
   const minGuests = restaurant?.minimumPartySize ?? 1;
   const maxGuests = restaurant?.maximumPartySize ?? 10;
@@ -210,6 +213,23 @@ export default function Index() {
                 transition={{ duration: 0.35 }}
                 className="space-y-6"
               >
+                {existingWaitlistToken && (
+                  <button
+                    onClick={() => navigate(`/restaurant/${slug}/attente/${existingWaitlistToken}`)}
+                    className="w-full rounded-xl bg-card p-4 shadow-sm flex items-center gap-3 text-left hover:shadow-md transition-shadow"
+                  >
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[hsl(45,93%,47%)]/10">
+                      <Hourglass className="h-4 w-4 text-[hsl(45,80%,35%)]" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-foreground">
+                        Vous êtes sur la liste d'attente
+                      </p>
+                      <p className="text-xs text-muted-foreground">Voir ma position →</p>
+                    </div>
+                  </button>
+                )}
+
                 <div className="space-y-1 px-1">
                   <h2 className="text-2xl font-extrabold tracking-tight text-foreground">
                     Réserver une table
@@ -301,6 +321,22 @@ export default function Index() {
                   )}
                 </div>
 
+                {/* Aucun créneau : proposer la liste d'attente */}
+                {!slotsLoading && !slotsError && (slots ?? []).every((s) => !s.available) && (
+                  <div className="rounded-xl bg-card p-5 shadow-sm space-y-3 text-center">
+                    <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-secondary">
+                      <Hourglass className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Complet ce jour-là ? Inscrivez-vous sur la liste d'attente et soyez prévenu
+                      dès qu'une table se libère.
+                    </p>
+                    <Button variant="outline" className="w-full" onClick={() => setWaitlistOpen(true)}>
+                      Rejoindre la liste d'attente
+                    </Button>
+                  </div>
+                )}
+
                 <button
                   disabled={!selectedSlot}
                   onClick={handleConfirmSlot}
@@ -347,6 +383,13 @@ export default function Index() {
           </AnimatePresence>
         ) : null}
       </div>
+
+      <WaitlistSheet
+        slug={slug}
+        partySize={guests}
+        open={waitlistOpen}
+        onOpenChange={setWaitlistOpen}
+      />
     </div>
   );
 }
