@@ -11,6 +11,7 @@ import { RestaurantHeader } from "@/components/RestaurantHeader";
 import { GuestSelector } from "@/components/GuestSelector";
 import { TimeSlotSelector } from "@/components/TimeSlotSelector";
 import { BookingForm, type BookingFormData } from "@/components/BookingForm";
+import { FindBooking } from "@/components/FindBooking";
 import { WaitlistSheet } from "@/components/WaitlistSheet";
 import { Loader } from "@/components/Loader";
 import { cn } from "@/lib/utils";
@@ -275,6 +276,8 @@ export default function Index() {
                 >
                   {date ? `Trouver une table — ${formattedDate}` : "Sélectionnez une date"}
                 </button>
+
+                <FindBooking slug={slug} />
               </motion.div>
             )}
 
