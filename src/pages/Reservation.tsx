@@ -21,7 +21,6 @@ import {
 } from "lucide-react";
 import { fr } from "date-fns/locale";
 import { RestaurantHeader } from "@/components/RestaurantHeader";
-import { Loader } from "@/components/Loader";
 import { GuestSelector } from "@/components/GuestSelector";
 import { TimeSlotSelector } from "@/components/TimeSlotSelector";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -295,8 +294,6 @@ export default function Reservation() {
 
   return (
     <div className="min-h-screen bg-background">
-      <AnimatePresence>{cancelMutation.isPending && <Loader />}</AnimatePresence>
-
       {/* Bandeau de confirmation d'annulation */}
       <AnimatePresence>
         {cancelBanner && (
@@ -323,9 +320,11 @@ export default function Reservation() {
                 </button>
                 <button
                   onClick={() => cancelMutation.mutate()}
-                  className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-destructive-foreground text-destructive hover:opacity-90 transition-colors"
+                  disabled={cancelMutation.isPending}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-destructive-foreground text-destructive hover:opacity-90 transition-colors disabled:opacity-70"
                 >
-                  Oui, annuler
+                  {cancelMutation.isPending && <Loader2 className="h-3 w-3 animate-spin" />}
+                  {cancelMutation.isPending ? "Annulation…" : "Oui, annuler"}
                 </button>
               </div>
             </div>

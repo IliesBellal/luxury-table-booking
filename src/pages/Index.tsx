@@ -14,7 +14,6 @@ import { BookingForm, type BookingFormData } from "@/components/BookingForm";
 import { FindBooking } from "@/components/FindBooking";
 import { Stepper } from "@/components/Stepper";
 import { WaitlistSheet } from "@/components/WaitlistSheet";
-import { Loader } from "@/components/Loader";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 import { useRestaurant, useSlug } from "@/hooks/use-restaurant";
@@ -167,8 +166,6 @@ export default function Index() {
 
   return (
     <div className="min-h-screen bg-background">
-      <AnimatePresence>{createMutation.isPending && <Loader />}</AnimatePresence>
-
       <div className="mx-auto max-w-md px-4 py-6 space-y-6">
         {/* Header */}
         <div className="rounded-xl bg-card p-4 shadow-sm flex items-center gap-2">
