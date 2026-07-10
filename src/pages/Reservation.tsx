@@ -7,7 +7,6 @@ import {
   CalendarDays,
   Users,
   Clock,
-  Hash,
   X,
   AlertTriangle,
   Hourglass,
@@ -20,6 +19,7 @@ import {
   Download,
 } from "lucide-react";
 import { fr } from "date-fns/locale";
+import { AnimatedCheck } from "@/components/AnimatedCheck";
 import { RestaurantHeader } from "@/components/RestaurantHeader";
 import { GuestSelector } from "@/components/GuestSelector";
 import { TimeSlotSelector } from "@/components/TimeSlotSelector";
@@ -367,14 +367,18 @@ export default function Reservation() {
           >
             {/* Statut */}
             <div className="rounded-xl bg-card p-6 shadow-sm text-center space-y-3">
-              <div
-                className={cn(
-                  "mx-auto flex h-16 w-16 items-center justify-center rounded-full",
-                  screen.bubbleClass
-                )}
-              >
-                <screen.icon className={cn("h-8 w-8", screen.iconClass)} />
-              </div>
+              {booking.status === "confirmed" ? (
+                <AnimatedCheck className="mx-auto h-16 w-16 text-[hsl(152,94%,39%)]" />
+              ) : (
+                <div
+                  className={cn(
+                    "mx-auto flex h-16 w-16 items-center justify-center rounded-full",
+                    screen.bubbleClass
+                  )}
+                >
+                  <screen.icon className={cn("h-8 w-8", screen.iconClass)} />
+                </div>
+              )}
               <h2 className="text-2xl font-extrabold tracking-tight text-foreground">
                 {screen.title}
               </h2>
@@ -384,30 +388,47 @@ export default function Reservation() {
               )}
             </div>
 
-            {/* Détails */}
-            <div className="rounded-xl bg-card p-5 shadow-sm space-y-4">
-              <DetailRow icon={Hash} label="Numéro" value={booking.booking_number} />
-              <DetailRow icon={CalendarDays} label="Date" value={formattedDate} />
-              <DetailRow
-                icon={Clock}
-                label="Heure"
-                value={
-                  booking.duration_minutes > 0
-                    ? `${formattedTime} · ${booking.duration_minutes} min`
-                    : formattedTime
-                }
-              />
-              <DetailRow
-                icon={Users}
-                label="Convives"
-                value={`${booking.party_size} personne${booking.party_size > 1 ? "s" : ""}`}
-              />
-              {booking.comment && (
-                <div className="pt-2 border-t border-border">
-                  <p className="text-xs text-muted-foreground">Remarque</p>
-                  <p className="text-sm text-foreground mt-1">{booking.comment}</p>
-                </div>
-              )}
+            {/* Détails — carte billet */}
+            <div className="rounded-xl bg-card shadow-sm overflow-hidden">
+              <div className="p-5 text-center space-y-1">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                  Réservation n°
+                </p>
+                <p className="font-mono text-2xl font-extrabold tracking-widest text-foreground">
+                  {booking.booking_number}
+                </p>
+              </div>
+
+              {/* Perforation du billet */}
+              <div className="relative flex items-center" aria-hidden="true">
+                <span className="absolute -left-3 h-6 w-6 rounded-full bg-background" />
+                <span className="absolute -right-3 h-6 w-6 rounded-full bg-background" />
+                <div className="mx-5 w-full border-t-2 border-dashed border-border" />
+              </div>
+
+              <div className="p-5 space-y-4">
+                <DetailRow icon={CalendarDays} label="Date" value={formattedDate} />
+                <DetailRow
+                  icon={Clock}
+                  label="Heure"
+                  value={
+                    booking.duration_minutes > 0
+                      ? `${formattedTime} · ${booking.duration_minutes} min`
+                      : formattedTime
+                  }
+                />
+                <DetailRow
+                  icon={Users}
+                  label="Convives"
+                  value={`${booking.party_size} personne${booking.party_size > 1 ? "s" : ""}`}
+                />
+                {booking.comment && (
+                  <div className="pt-2 border-t border-border">
+                    <p className="text-xs text-muted-foreground">Remarque</p>
+                    <p className="text-sm text-foreground mt-1">{booking.comment}</p>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Ajouter au calendrier */}
