@@ -21,9 +21,11 @@ export function useRestaurant(slug: string) {
       error.code !== "-1" && failureCount < 2,
   });
 
-  // Applique l'identité visuelle du restaurant au design system
+  // Applique l'identité du restaurant : couleurs et titre de l'onglet
   useEffect(() => {
-    applyBranding(query.data?.merchant.design);
+    if (!query.data) return;
+    applyBranding(query.data.merchant.design);
+    document.title = `Réserver une table — ${query.data.merchant.business_name}`;
   }, [query.data]);
 
   return query;
