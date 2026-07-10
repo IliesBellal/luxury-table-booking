@@ -1,25 +1,24 @@
 import { Minus, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { restaurantData } from "@/data/restaurant";
 
 interface GuestSelectorProps {
   value: number;
   onChange: (n: number) => void;
+  min?: number;
   max?: number;
 }
 
-const defaultMax = restaurantData.data.maximum_party_size;
-
-export function GuestSelector({ value, onChange, max = defaultMax }: GuestSelectorProps) {
+export function GuestSelector({ value, onChange, min = 1, max = 10 }: GuestSelectorProps) {
   return (
     <div className="flex items-center justify-center gap-6">
       <button
         type="button"
-        disabled={value <= 1}
-        onClick={() => onChange(Math.max(1, value - 1))}
+        disabled={value <= min}
+        onClick={() => onChange(Math.max(min, value - 1))}
+        aria-label="Moins de convives"
         className={cn(
           "flex h-12 w-12 items-center justify-center rounded-full border border-border bg-card text-foreground transition-all active:scale-95",
-          value <= 1 && "opacity-30 cursor-not-allowed"
+          value <= min && "opacity-30 cursor-not-allowed"
         )}
       >
         <Minus className="h-5 w-5" />
@@ -33,6 +32,7 @@ export function GuestSelector({ value, onChange, max = defaultMax }: GuestSelect
         type="button"
         disabled={value >= max}
         onClick={() => onChange(Math.min(max, value + 1))}
+        aria-label="Plus de convives"
         className={cn(
           "flex h-12 w-12 items-center justify-center rounded-full border border-border bg-card text-foreground transition-all active:scale-95",
           value >= max && "opacity-30 cursor-not-allowed"

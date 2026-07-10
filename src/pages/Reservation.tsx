@@ -1,17 +1,32 @@
-import { useEffect, useState, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { Check, CalendarDays, Users, Clock, Hash, X, AlertTriangle } from "lucide-react";
+import {
+  Check,
+  CalendarDays,
+  Users,
+  Clock,
+  Hash,
+  X,
+  AlertTriangle,
+  Hourglass,
+  UtensilsCrossed,
+  Sparkles,
+  Ban,
+  Timer,
+  Loader2,
+} from "lucide-react";
 import { fr } from "date-fns/locale";
 import { RestaurantHeader } from "@/components/RestaurantHeader";
 import { Loader } from "@/components/Loader";
-import { BookingForm, type BookingFormData } from "@/components/BookingForm";
 import { GuestSelector } from "@/components/GuestSelector";
 import { TimeSlotSelector } from "@/components/TimeSlotSelector";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Calendar } from "@/components/ui/calendar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Sheet,
   SheetContent,
@@ -21,190 +36,265 @@ import {
 } from "@/components/ui/sheet";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { restaurantData } from "@/data/restaurant";
+import { useRestaurant, useSlug } from "@/hooks/use-restaurant";
 import {
-  getBooking,
-  updateBooking,
+  ApiError,
+  bookingLocalParts,
   cancelBooking,
-  canModify,
-  type BookingDetail,
+  formatBookingDate,
+  getAvailability,
+  getBooking,
+  toDateKey,
+  updateBooking,
+  type ApiSlot,
+  type BookingPublic,
+  type BookingStatus,
 } from "@/lib/api";
+import { forgetBooking } from "@/lib/storage";
 
-const { open_days, merchant } = restaurantData.data;
-
-// Mock slots for modification
-const MOCK_SLOTS = [
-  { time: "12:00", available: true },
-  { time: "12:15", available: true },
-  { time: "12:30", available: true },
-  { time: "12:45", available: true },
-  { time: "13:00", available: true },
-  { time: "19:00", available: true },
-  { time: "19:15", available: true },
-  { time: "19:30", available: true },
-  { time: "19:45", available: true },
-  { time: "20:00", available: true },
-  { time: "20:15", available: true },
-  { time: "20:30", available: true },
-];
-
-function isDisabled(date: Date) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  if (date < today) return true;
-  if (!open_days.includes(date.getDay())) return true;
-  return false;
+interface StatusScreen {
+  icon: React.ElementType;
+  iconClass: string;
+  bubbleClass: string;
+  title: string;
+  subtitle?: string;
 }
 
+const STATUS_SCREENS: Record<BookingStatus, StatusScreen> = {
+  pending: {
+    icon: Hourglass,
+    iconClass: "text-[hsl(45,80%,35%)]",
+    bubbleClass: "bg-[hsl(45,93%,47%)]/10",
+    title: "Demande envoyée !",
+    subtitle: "Le restaurant confirme votre réservation très prochainement.",
+  },
+  confirmed: {
+    icon: Check,
+    iconClass: "text-[hsl(152,94%,39%)]",
+    bubbleClass: "bg-[hsl(152,94%,39%)]/10",
+    title: "Réservation confirmée !",
+    subtitle: "Nous avons hâte de vous accueillir.",
+  },
+  seated: {
+    icon: UtensilsCrossed,
+    iconClass: "text-[hsl(210,90%,45%)]",
+    bubbleClass: "bg-[hsl(210,90%,50%)]/10",
+    title: "Vous êtes à table",
+    subtitle: "Bon appétit !",
+  },
+  completed: {
+    icon: Sparkles,
+    iconClass: "text-foreground",
+    bubbleClass: "bg-secondary",
+    title: "Merci de votre visite !",
+    subtitle: "Au plaisir de vous revoir bientôt.",
+  },
+  cancelled: {
+    icon: X,
+    iconClass: "text-destructive",
+    bubbleClass: "bg-destructive/10",
+    title: "Réservation annulée",
+  },
+  no_show: {
+    icon: Timer,
+    iconClass: "text-muted-foreground",
+    bubbleClass: "bg-secondary",
+    title: "Réservation non honorée",
+    subtitle: "Cette réservation a été marquée comme absence.",
+  },
+  denied: {
+    icon: Ban,
+    iconClass: "text-destructive",
+    bubbleClass: "bg-destructive/10",
+    title: "Réservation refusée",
+    subtitle: "Le restaurant n'a pas pu accepter votre demande pour ce créneau.",
+  },
+};
+
 export default function Reservation() {
+  const slug = useSlug();
   const { bookingNumber } = useParams<{ bookingNumber: string }>();
   const navigate = useNavigate();
-  const [booking, setBooking] = useState<BookingDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [cancelBanner, setCancelBanner] = useState(false);
+  const location = useLocation();
+  const queryClient = useQueryClient();
 
-  // Edit state
-  const [editStep, setEditStep] = useState<1 | 2 | 3>(1);
+  const { data: restaurant } = useRestaurant(slug);
+
+  const {
+    data: booking,
+    isLoading,
+    error,
+  } = useQuery<BookingPublic, ApiError>({
+    queryKey: ["booking", slug, bookingNumber],
+    queryFn: () => getBooking(slug, bookingNumber!),
+    enabled: !!slug && !!bookingNumber,
+    retry: (count, err) => err.code !== "0" && err.code !== "-1" && count < 2,
+  });
+
+  // Réservation supprimée du carnet local si introuvable
+  useEffect(() => {
+    if (error?.code === "0" && bookingNumber) forgetBooking(slug, bookingNumber);
+  }, [error, slug, bookingNumber]);
+
+  // Avertissement doublon éventuel remonté par la création
+  useEffect(() => {
+    const state = location.state as { warning?: string } | null;
+    if (state?.warning === "possible_duplicate_same_phone_same_slot") {
+      toast({
+        title: "Réservation similaire détectée",
+        description:
+          "Une réservation avec le même téléphone existe déjà sur ce créneau. Vérifiez vos réservations pour éviter un doublon.",
+      });
+      // Nettoie le state pour ne pas re-toaster au refresh
+      window.history.replaceState({}, "");
+    }
+  }, [location.state]);
+
+  const [cancelBanner, setCancelBanner] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editStep, setEditStep] = useState<1 | 2>(1);
   const [editDate, setEditDate] = useState<Date | undefined>();
   const [editGuests, setEditGuests] = useState(2);
   const [editSlot, setEditSlot] = useState<string | null>(null);
-  const [editSlots, setEditSlots] = useState(MOCK_SLOTS);
+  const [editComment, setEditComment] = useState("");
 
-  const fetchBooking = useCallback(async () => {
-    if (!bookingNumber) return;
-    try {
-      setLoading(true);
-      const data = await getBooking(bookingNumber);
-      setBooking(data);
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [bookingNumber]);
+  const timezone = booking?.merchant.timezone ?? restaurant?.merchant.timezone ?? "Europe/Paris";
+  const editDateKey = editDate ? toDateKey(editDate) : null;
 
-  useEffect(() => {
-    fetchBooking();
-  }, [fetchBooking]);
+  const {
+    data: editSlots,
+    isFetching: editSlotsLoading,
+    error: editSlotsError,
+    refetch: refetchEditSlots,
+  } = useQuery<ApiSlot[], ApiError>({
+    queryKey: ["availability", slug, editDateKey, editGuests],
+    queryFn: () => getAvailability(slug, editDateKey!, editGuests),
+    enabled: editOpen && editStep === 2 && !!editDateKey,
+    staleTime: 30 * 1000,
+  });
 
-  const openEdit = useCallback(() => {
-    if (!booking) return;
-    const d = new Date(booking.start_date * 1000);
-    setEditDate(d);
-    setEditGuests(booking.party_size);
-    setEditSlot(
-      d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
-    );
-    setEditStep(1);
-    setEditOpen(true);
-  }, [booking]);
-
-  const handleEditFindSlots = useCallback(async () => {
-    if (!editDate) return;
-    setActionLoading(true);
-    await new Promise((r) => setTimeout(r, 800));
-    setEditSlots(MOCK_SLOTS);
-    setActionLoading(false);
-    setEditStep(2);
-  }, [editDate]);
-
-  const handleEditConfirmSlot = useCallback(() => {
-    if (editSlot) setEditStep(3);
-  }, [editSlot]);
-
-  const handleUpdate = useCallback(
-    async (data: BookingFormData) => {
-      if (!bookingNumber || !editDate || !editSlot) return;
-      try {
-        setActionLoading(true);
-        const [hours, minutes] = editSlot.split(":").map(Number);
-        const bookingDate = new Date(editDate);
-        bookingDate.setHours(hours, minutes, 0, 0);
-        const startDateUnix = Math.floor(bookingDate.getTime() / 1000);
-
-        await updateBooking(bookingNumber, {
-          customer: {
-            customer_first_name: data.firstName,
-            customer_last_name: data.lastName,
-            customer_email: data.email,
-            customer_tel: data.phone,
-          },
-          booking: {
-            start_date: startDateUnix,
-            party_size: editGuests,
-            comment: data.notes,
-          },
-        });
-        toast({
-          title: "Réservation modifiée",
-          description: "Vos informations ont été mises à jour.",
-        });
-        setEditOpen(false);
-        await fetchBooking();
-      } catch (e: any) {
-        toast({
-          title: "Erreur",
-          description: e.message,
-          variant: "destructive",
-        });
-      } finally {
-        setActionLoading(false);
-      }
+  const updateMutation = useMutation({
+    mutationFn: () =>
+      updateBooking(slug, booking!.booking_number, {
+        date: editDateKey!,
+        time: editSlot!,
+        partySize: editGuests,
+        comment: editComment,
+      }),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(["booking", slug, bookingNumber], updated);
+      queryClient.invalidateQueries({ queryKey: ["availability", slug] });
+      setEditOpen(false);
+      toast({
+        title: "Réservation modifiée",
+        description:
+          updated.status === "pending"
+            ? "Votre demande a été mise à jour et attend la confirmation du restaurant."
+            : "Votre réservation a été mise à jour.",
+      });
     },
-    [bookingNumber, editDate, editSlot, editGuests, fetchBooking]
-  );
+    onError: (e: ApiError) => {
+      if (e.code === "slot_unavailable") {
+        setEditSlot(null);
+        refetchEditSlots();
+      }
+      if (e.code === "too_late_to_edit") {
+        setEditOpen(false);
+        queryClient.invalidateQueries({ queryKey: ["booking", slug, bookingNumber] });
+      }
+      toast({ title: "Erreur", description: e.message, variant: "destructive" });
+    },
+  });
 
-  const handleCancel = useCallback(async () => {
-    if (!bookingNumber) return;
-    try {
-      setActionLoading(true);
-      setCancelBanner(false);
-      await cancelBooking(bookingNumber);
+  const cancelMutation = useMutation({
+    mutationFn: () => cancelBooking(slug, booking!.booking_number),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["booking", slug, bookingNumber] });
       toast({
         title: "Réservation annulée",
         description: "Votre réservation a bien été annulée.",
       });
-      await fetchBooking();
-    } catch (e: any) {
-      toast({
-        title: "Erreur",
-        description: e.message,
-        variant: "destructive",
-      });
-    } finally {
-      setActionLoading(false);
-    }
-  }, [bookingNumber, fetchBooking]);
+    },
+    onError: (e: ApiError) => {
+      if (e.code === "too_late_to_edit") {
+        queryClient.invalidateQueries({ queryKey: ["booking", slug, bookingNumber] });
+      }
+      toast({ title: "Erreur", description: e.message, variant: "destructive" });
+    },
+    onSettled: () => setCancelBanner(false),
+  });
 
-  const startDate = booking ? new Date(booking.start_date * 1000) : null;
-  const formattedDate = startDate?.toLocaleDateString("fr-FR", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
-  const formattedTime = startDate?.toLocaleTimeString("fr-FR", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-  const modifiable = booking ? canModify(booking) && booking.status === "confirmed" : false;
-  const hoursUntil = booking ? (booking.start_date - Date.now() / 1000) / 3600 : Infinity;
-  const showLimitMessage = booking && booking.cancelable_by_customer && !modifiable && booking.status === "confirmed";
+  const openEdit = useCallback(() => {
+    if (!booking) return;
+    const { dateKey, time } = bookingLocalParts(booking.date_from, timezone);
+    const [y, m, d] = dateKey.split("-").map(Number);
+    setEditDate(new Date(y, m - 1, d));
+    setEditGuests(booking.party_size);
+    setEditSlot(time);
+    setEditComment(booking.comment ?? "");
+    setEditStep(1);
+    setEditOpen(true);
+  }, [booking, timezone]);
 
-  const editFormattedDate = editDate?.toLocaleDateString("fr-FR", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  });
+  const isDisabledDay = useCallback(
+    (d: Date) => {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (d < today) return true;
+      if (restaurant) {
+        if (!restaurant.openDays.includes(d.getDay())) return true;
+        const horizon = restaurant.merchant.max_booking_horizon_days;
+        if (horizon > 0) {
+          const limit = new Date(today);
+          limit.setDate(limit.getDate() + horizon);
+          if (d > limit) return true;
+        }
+      }
+      return false;
+    },
+    [restaurant]
+  );
+
+  const formattedDate = booking
+    ? formatBookingDate(booking.date_from, timezone, {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      })
+    : "";
+  const formattedTime = booking
+    ? formatBookingDate(booking.date_from, timezone, {
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      })
+    : "";
+
+  const screen = booking ? STATUS_SCREENS[booking.status] ?? STATUS_SCREENS.pending : null;
+  const actionable = booking ? booking.modifiable || booking.cancelable : false;
+  const showLimitMessage =
+    booking &&
+    !actionable &&
+    (booking.status === "confirmed" || booking.status === "pending");
+
+  const editFormattedDate = useMemo(
+    () =>
+      editDate?.toLocaleDateString("fr-FR", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+      }),
+    [editDate]
+  );
+
+  const headerMerchant = booking?.merchant ?? restaurant?.merchant;
 
   return (
     <div className="min-h-screen bg-background">
-      <AnimatePresence>{actionLoading && <Loader />}</AnimatePresence>
+      <AnimatePresence>{cancelMutation.isPending && <Loader />}</AnimatePresence>
 
-      {/* Cancel Banner */}
+      {/* Bandeau de confirmation d'annulation */}
       <AnimatePresence>
         {cancelBanner && (
           <motion.div
@@ -217,7 +307,9 @@ export default function Reservation() {
             <div className="mx-auto max-w-md flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <AlertTriangle className="h-4 w-4 shrink-0" />
-                <p className="text-sm font-medium">Annuler cette réservation ? Cette action est irréversible.</p>
+                <p className="text-sm font-medium">
+                  Annuler cette réservation ? Cette action est irréversible.
+                </p>
               </div>
               <div className="flex gap-2 shrink-0">
                 <button
@@ -227,7 +319,7 @@ export default function Reservation() {
                   Non
                 </button>
                 <button
-                  onClick={handleCancel}
+                  onClick={() => cancelMutation.mutate()}
                   className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-destructive-foreground text-destructive hover:opacity-90 transition-colors"
                 >
                   Oui, annuler
@@ -241,16 +333,16 @@ export default function Reservation() {
       <div className="mx-auto max-w-md px-4 py-6 space-y-6">
         {/* Header */}
         <div className="rounded-xl bg-card p-4 shadow-sm">
-          <RestaurantHeader />
+          <RestaurantHeader merchant={headerMerchant} />
         </div>
 
-        {/* Content */}
-        {loading ? (
+        {/* Contenu */}
+        {isLoading ? (
           <div className="rounded-xl bg-card p-6 shadow-sm space-y-4">
+            <Skeleton className="h-16 w-16 rounded-full mx-auto" />
             <Skeleton className="h-8 w-3/4 mx-auto" />
             <Skeleton className="h-4 w-1/2 mx-auto" />
             <div className="space-y-3 pt-4">
-              <Skeleton className="h-12 w-full" />
               <Skeleton className="h-12 w-full" />
               <Skeleton className="h-12 w-full" />
               <Skeleton className="h-12 w-full" />
@@ -259,51 +351,50 @@ export default function Reservation() {
         ) : error ? (
           <div className="rounded-xl bg-card p-8 shadow-sm text-center space-y-3">
             <X className="h-12 w-12 mx-auto text-destructive" />
-            <h2 className="text-xl font-bold text-foreground">{error}</h2>
-            <Button variant="outline" onClick={() => navigate("/")}>
+            <h2 className="text-xl font-bold text-foreground">{error.message}</h2>
+            <Button variant="outline" onClick={() => navigate(`/restaurant/${slug}`)}>
               Retour à l'accueil
             </Button>
           </div>
-        ) : booking ? (
+        ) : booking && screen ? (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4 }}
             className="space-y-6"
           >
-            {/* Status */}
+            {/* Statut */}
             <div className="rounded-xl bg-card p-6 shadow-sm text-center space-y-3">
-              {booking.status === "confirmed" ? (
-                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[hsl(152,94%,39%)]/10">
-                  <Check className="h-8 w-8 text-[hsl(152,94%,39%)]" />
-                </div>
-              ) : booking.status === "pending_approval" ? (
-                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[hsl(45,93%,47%)]/10">
-                  <Clock className="h-8 w-8 text-[hsl(45,80%,35%)]" />
-                </div>
-              ) : (
-                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-destructive/10">
-                  <X className="h-8 w-8 text-destructive" />
-                </div>
-              )}
+              <div
+                className={cn(
+                  "mx-auto flex h-16 w-16 items-center justify-center rounded-full",
+                  screen.bubbleClass
+                )}
+              >
+                <screen.icon className={cn("h-8 w-8", screen.iconClass)} />
+              </div>
               <h2 className="text-2xl font-extrabold tracking-tight text-foreground">
-                {booking.status === "confirmed"
-                  ? "Réservation confirmée !"
-                  : booking.status === "pending_approval"
-                  ? "En attente de confirmation"
-                  : "Réservation annulée"}
+                {screen.title}
               </h2>
               <StatusBadge status={booking.status} />
-              <p className="text-sm text-muted-foreground">
-                {booking.customer_first_name} {booking.customer_last_name}
-              </p>
+              {screen.subtitle && (
+                <p className="text-sm text-muted-foreground">{screen.subtitle}</p>
+              )}
             </div>
 
-            {/* Details */}
+            {/* Détails */}
             <div className="rounded-xl bg-card p-5 shadow-sm space-y-4">
               <DetailRow icon={Hash} label="Numéro" value={booking.booking_number} />
-              <DetailRow icon={CalendarDays} label="Date" value={formattedDate ?? ""} />
-              <DetailRow icon={Clock} label="Heure" value={formattedTime ?? ""} />
+              <DetailRow icon={CalendarDays} label="Date" value={formattedDate} />
+              <DetailRow
+                icon={Clock}
+                label="Heure"
+                value={
+                  booking.duration_minutes > 0
+                    ? `${formattedTime} · ${booking.duration_minutes} min`
+                    : formattedTime
+                }
+              />
               <DetailRow
                 icon={Users}
                 label="Convives"
@@ -317,40 +408,59 @@ export default function Reservation() {
               )}
             </div>
 
-            {/* Limit message */}
+            {/* Délai dépassé / non modifiable */}
             {showLimitMessage && (
               <div className="rounded-xl bg-muted p-4 text-center">
                 <p className="text-sm text-muted-foreground">
-                  Le délai de modification est dépassé (minimum{" "}
-                  {booking.cancel_booking_limit_offset_hours}h avant).
+                  Cette réservation ne peut plus être modifiée en ligne. Pour tout changement,
+                  contactez le restaurant
+                  {headerMerchant?.phone ? (
+                    <>
+                      {" "}
+                      au{" "}
+                      <a href={`tel:${headerMerchant.phone}`} className="font-semibold underline">
+                        {headerMerchant.phone}
+                      </a>
+                    </>
+                  ) : null}
+                  .
                 </p>
               </div>
             )}
 
             {/* Actions */}
-            {modifiable && (
-              <div className="flex gap-3">
-                <Button
-                  variant="outline"
-                  className="flex-1"
-                  onClick={openEdit}
-                >
-                  Modifier
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="flex-1 text-destructive hover:text-destructive hover:bg-destructive/10"
-                  onClick={() => setCancelBanner(true)}
-                >
-                  Annuler
-                </Button>
+            {actionable && (
+              <div className="space-y-2">
+                <div className="flex gap-3">
+                  {booking.modifiable && (
+                    <Button variant="outline" className="flex-1" onClick={openEdit}>
+                      Modifier
+                    </Button>
+                  )}
+                  {booking.cancelable && (
+                    <Button
+                      variant="ghost"
+                      className="flex-1 text-destructive hover:text-destructive hover:bg-destructive/10"
+                      onClick={() => setCancelBanner(true)}
+                    >
+                      Annuler
+                    </Button>
+                  )}
+                </div>
+                {booking.modifiable && booking.remaining_updates < 3 && (
+                  <p className="text-center text-xs text-muted-foreground">
+                    {booking.remaining_updates > 0
+                      ? `Encore ${booking.remaining_updates} modification${booking.remaining_updates > 1 ? "s" : ""} possible${booking.remaining_updates > 1 ? "s" : ""}`
+                      : "Plus aucune modification possible"}
+                  </p>
+                )}
               </div>
             )}
 
             <Button
               variant="ghost"
               className="w-full text-muted-foreground"
-              onClick={() => navigate("/")}
+              onClick={() => navigate(`/restaurant/${slug}`)}
             >
               Nouvelle réservation
             </Button>
@@ -358,7 +468,7 @@ export default function Reservation() {
         ) : null}
       </div>
 
-      {/* Edit Sheet */}
+      {/* Sheet de modification (date, horaire, convives, remarque) */}
       <Sheet open={editOpen} onOpenChange={setEditOpen}>
         <SheetContent
           side="bottom"
@@ -367,13 +477,12 @@ export default function Reservation() {
           <SheetHeader className="text-left">
             <SheetTitle>Modifier la réservation</SheetTitle>
             <SheetDescription>
-              Modifiez la date, l'heure, ou vos coordonnées.
+              Changez la date, l'horaire, le nombre de convives ou votre remarque.
             </SheetDescription>
           </SheetHeader>
 
           <div className="mt-6 space-y-6">
             <AnimatePresence mode="wait">
-              {/* Edit Step 1: Date & Guests */}
               {editStep === 1 && (
                 <motion.div
                   key="edit-step1"
@@ -387,7 +496,12 @@ export default function Reservation() {
                     <label className="text-sm font-semibold text-foreground">
                       Nombre de convives
                     </label>
-                    <GuestSelector value={editGuests} onChange={setEditGuests} />
+                    <GuestSelector
+                      value={editGuests}
+                      onChange={setEditGuests}
+                      min={restaurant?.minimumPartySize ?? 1}
+                      max={restaurant?.maximumPartySize ?? 10}
+                    />
                   </div>
 
                   <div className="flex justify-center">
@@ -395,7 +509,7 @@ export default function Reservation() {
                       mode="single"
                       selected={editDate}
                       onSelect={setEditDate}
-                      disabled={isDisabled}
+                      disabled={isDisabledDay}
                       locale={fr}
                       className={cn("p-0 pointer-events-auto")}
                       classNames={{
@@ -408,7 +522,10 @@ export default function Reservation() {
 
                   <button
                     disabled={!editDate}
-                    onClick={handleEditFindSlots}
+                    onClick={() => {
+                      setEditSlot(null);
+                      setEditStep(2);
+                    }}
                     className={cn(
                       "w-full rounded-xl py-3.5 text-sm font-bold transition-all shadow-sm",
                       editDate
@@ -416,12 +533,13 @@ export default function Reservation() {
                         : "bg-muted text-muted-foreground cursor-not-allowed"
                     )}
                   >
-                    {editDate ? `Voir les créneaux — ${editFormattedDate}` : "Sélectionnez une date"}
+                    {editDate
+                      ? `Voir les créneaux — ${editFormattedDate}`
+                      : "Sélectionnez une date"}
                   </button>
                 </motion.div>
               )}
 
-              {/* Edit Step 2: Time Slots */}
               {editStep === 2 && (
                 <motion.div
                   key="edit-step2"
@@ -440,60 +558,62 @@ export default function Reservation() {
                     </button>
                     <p className="text-sm text-muted-foreground">
                       Pour {editGuests} personne{editGuests > 1 ? "s" : ""} le{" "}
-                      {editFormattedDate}. Durée : {merchant.default_booking_duration} min.
+                      {editFormattedDate}.
                     </p>
                   </div>
 
-                  <TimeSlotSelector
-                    slots={editSlots}
-                    selected={editSlot}
-                    onSelect={setEditSlot}
-                  />
+                  {editSlotsLoading ? (
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+                      {Array.from({ length: 8 }).map((_, i) => (
+                        <Skeleton key={i} className="h-11 rounded-xl" />
+                      ))}
+                    </div>
+                  ) : editSlotsError ? (
+                    <div className="text-center py-6 space-y-3">
+                      <p className="text-sm text-muted-foreground">{editSlotsError.message}</p>
+                      <Button variant="outline" size="sm" onClick={() => refetchEditSlots()}>
+                        Réessayer
+                      </Button>
+                    </div>
+                  ) : (
+                    <TimeSlotSelector
+                      slots={editSlots ?? []}
+                      selected={editSlot}
+                      onSelect={setEditSlot}
+                    />
+                  )}
+
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-semibold text-foreground">
+                      Remarque (optionnel)
+                    </label>
+                    <Textarea
+                      placeholder="Allergies, occasion spéciale…"
+                      value={editComment}
+                      onChange={(e) => setEditComment(e.target.value)}
+                      maxLength={500}
+                      rows={3}
+                    />
+                  </div>
 
                   <button
-                    disabled={!editSlot}
-                    onClick={handleEditConfirmSlot}
+                    disabled={!editSlot || updateMutation.isPending}
+                    onClick={() => updateMutation.mutate()}
                     className={cn(
                       "w-full rounded-xl py-3.5 text-sm font-bold transition-all shadow-sm",
-                      editSlot
+                      "inline-flex items-center justify-center gap-2",
+                      editSlot && !updateMutation.isPending
                         ? "bg-primary text-primary-foreground hover:opacity-90 active:scale-[0.98]"
                         : "bg-muted text-muted-foreground cursor-not-allowed"
                     )}
                   >
-                    {editSlot ? `Continuer — ${editSlot}` : "Sélectionnez un horaire"}
+                    {updateMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                    {updateMutation.isPending
+                      ? "Enregistrement…"
+                      : editSlot
+                        ? `Enregistrer — ${editSlot}`
+                        : "Sélectionnez un horaire"}
                   </button>
-                </motion.div>
-              )}
-
-              {/* Edit Step 3: Form */}
-              {editStep === 3 && (
-                <motion.div
-                  key="edit-step3"
-                  initial={{ opacity: 0, x: 30 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -30 }}
-                  transition={{ duration: 0.25 }}
-                >
-                  <button
-                    onClick={() => setEditStep(2)}
-                    className="text-sm text-muted-foreground hover:text-foreground transition-colors mb-4"
-                  >
-                    ← Retour
-                  </button>
-                  {booking && (
-                    <BookingForm
-                      onSubmit={handleUpdate}
-                      isSubmitting={actionLoading}
-                      submitLabel="Enregistrer les modifications"
-                      defaultValues={{
-                        firstName: booking.customer_first_name,
-                        lastName: booking.customer_last_name,
-                        email: booking.customer_email,
-                        phone: booking.customer_tel,
-                        notes: booking.comment,
-                      }}
-                    />
-                  )}
                 </motion.div>
               )}
             </AnimatePresence>

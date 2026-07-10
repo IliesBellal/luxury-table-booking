@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
+import { Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -12,17 +13,20 @@ interface BookingFormProps {
 }
 
 export interface BookingFormData {
-  firstName: string;
-  lastName: string;
+  name: string;
   email: string;
   phone: string;
   notes: string;
 }
 
-export function BookingForm({ onSubmit, isSubmitting, defaultValues, submitLabel = "Confirmer la réservation" }: BookingFormProps) {
+export function BookingForm({
+  onSubmit,
+  isSubmitting,
+  defaultValues,
+  submitLabel = "Confirmer la réservation",
+}: BookingFormProps) {
   const [form, setForm] = useState<BookingFormData>({
-    firstName: defaultValues?.firstName ?? "",
-    lastName: defaultValues?.lastName ?? "",
+    name: defaultValues?.name ?? "",
     email: defaultValues?.email ?? "",
     phone: defaultValues?.phone ?? "",
     notes: defaultValues?.notes ?? "",
@@ -31,8 +35,7 @@ export function BookingForm({ onSubmit, isSubmitting, defaultValues, submitLabel
 
   function validate(): boolean {
     const e: typeof errors = {};
-    if (!form.firstName.trim()) e.firstName = "Requis";
-    if (!form.lastName.trim()) e.lastName = "Requis";
+    if (!form.name.trim()) e.name = "Requis";
     if (!form.email.trim()) e.email = "Requis";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) e.email = "Email invalide";
     if (!form.phone.trim()) e.phone = "Requis";
@@ -43,7 +46,8 @@ export function BookingForm({ onSubmit, isSubmitting, defaultValues, submitLabel
 
   function handleSubmit(ev: React.FormEvent) {
     ev.preventDefault();
-    if (validate()) onSubmit(form);
+    if (isSubmitting) return;
+    if (validate()) onSubmit({ ...form, name: form.name.trim() });
   }
 
   function update(field: keyof BookingFormData, value: string) {
@@ -60,29 +64,22 @@ export function BookingForm({ onSubmit, isSubmitting, defaultValues, submitLabel
       onSubmit={handleSubmit}
       className="space-y-5"
     >
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Prénom" error={errors.firstName}>
-          <Input
-            placeholder="Jean"
-            value={form.firstName}
-            onChange={(e) => update("firstName", e.target.value)}
-            maxLength={100}
-          />
-        </Field>
-        <Field label="Nom" error={errors.lastName}>
-          <Input
-            placeholder="Dupont"
-            value={form.lastName}
-            onChange={(e) => update("lastName", e.target.value)}
-            maxLength={100}
-          />
-        </Field>
-      </div>
+      <Field label="Nom complet" error={errors.name}>
+        <Input
+          placeholder="Jean Dupont"
+          autoComplete="name"
+          value={form.name}
+          onChange={(e) => update("name", e.target.value)}
+          maxLength={200}
+        />
+      </Field>
 
       <Field label="Email" error={errors.email}>
         <Input
           type="email"
           placeholder="jean@email.com"
+          autoComplete="email"
+          inputMode="email"
           value={form.email}
           onChange={(e) => update("email", e.target.value)}
           maxLength={255}
@@ -93,6 +90,8 @@ export function BookingForm({ onSubmit, isSubmitting, defaultValues, submitLabel
         <Input
           type="tel"
           placeholder="+33 6 12 34 56 78"
+          autoComplete="tel"
+          inputMode="tel"
           value={form.phone}
           onChange={(e) => update("phone", e.target.value)}
           maxLength={20}
@@ -115,10 +114,12 @@ export function BookingForm({ onSubmit, isSubmitting, defaultValues, submitLabel
         className={cn(
           "w-full rounded-xl py-3.5 text-sm font-bold transition-all shadow-sm",
           "bg-primary text-primary-foreground hover:opacity-90 active:scale-[0.98]",
+          "inline-flex items-center justify-center gap-2",
           isSubmitting && "opacity-60 cursor-not-allowed"
         )}
       >
-        {isSubmitting ? "Enregistrement…" : submitLabel}
+        {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+        {isSubmitting ? "Envoi en cours…" : submitLabel}
       </button>
     </motion.form>
   );

@@ -1,51 +1,30 @@
-import { useState, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fr } from "date-fns/locale";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, SearchX } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { RestaurantHeader } from "@/components/RestaurantHeader";
 import { GuestSelector } from "@/components/GuestSelector";
 import { TimeSlotSelector } from "@/components/TimeSlotSelector";
 import { BookingForm, type BookingFormData } from "@/components/BookingForm";
 import { Loader } from "@/components/Loader";
-import { restaurantData } from "@/data/restaurant";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
-import { createBooking } from "@/lib/api";
-
-const { open_days, maximum_party_size, merchant } = restaurantData.data;
+import { useRestaurant, useSlug } from "@/hooks/use-restaurant";
+import {
+  ApiError,
+  createBooking,
+  getAvailability,
+  toDateKey,
+  type ApiSlot,
+} from "@/lib/api";
+import { rememberBooking } from "@/lib/storage";
 
 type Step = 1 | 2 | 3;
-
-interface Slot {
-  time: string;
-  available: boolean;
-}
-
-// Mock API response
-const MOCK_SLOTS: Slot[] = [
-  { time: "12:00", available: true },
-  { time: "12:15", available: true },
-  { time: "12:30", available: true },
-  { time: "12:45", available: true },
-  { time: "13:00", available: true },
-  { time: "19:00", available: true },
-  { time: "19:15", available: true },
-  { time: "19:30", available: true },
-  { time: "19:45", available: true },
-  { time: "20:00", available: true },
-  { time: "20:15", available: true },
-  { time: "20:30", available: true },
-];
-
-function isDisabled(date: Date) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  if (date < today) return true;
-  if (!open_days.includes(date.getDay())) return true;
-  return false;
-}
 
 const pageVariants = {
   enter: { opacity: 0, x: 60 },
@@ -54,31 +33,97 @@ const pageVariants = {
 };
 
 export default function Index() {
+  const slug = useSlug();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { data: restaurant, isLoading: restaurantLoading, error: restaurantError } =
+    useRestaurant(slug);
+
   const [step, setStep] = useState<Step>(1);
   const [guests, setGuests] = useState(2);
   const [date, setDate] = useState<Date | undefined>(undefined);
-  const [loading, setLoading] = useState(false);
-  const [slots, setSlots] = useState<Slot[]>([]);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  const idempotencyKey = useRef<string>("");
 
-  const handleFindTable = useCallback(async () => {
+  const minGuests = restaurant?.minimumPartySize ?? 1;
+  const maxGuests = restaurant?.maximumPartySize ?? 10;
+
+  // Cale le nombre de convives dans les bornes du restaurant une fois connues
+  useEffect(() => {
+    if (!restaurant) return;
+    setGuests((g) => Math.min(Math.max(g, restaurant.minimumPartySize), restaurant.maximumPartySize));
+  }, [restaurant]);
+
+  const dateKey = date ? toDateKey(date) : null;
+
+  const {
+    data: slots,
+    isFetching: slotsLoading,
+    error: slotsError,
+    refetch: refetchSlots,
+  } = useQuery<ApiSlot[], ApiError>({
+    queryKey: ["availability", slug, dateKey, guests],
+    queryFn: () => getAvailability(slug, dateKey!, guests),
+    enabled: step >= 2 && !!dateKey,
+    staleTime: 30 * 1000,
+  });
+
+  const isDisabledDay = useCallback(
+    (d: Date) => {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (d < today) return true;
+      if (restaurant) {
+        if (!restaurant.openDays.includes(d.getDay())) return true;
+        const horizon = restaurant.merchant.max_booking_horizon_days;
+        if (horizon > 0) {
+          const limit = new Date(today);
+          limit.setDate(limit.getDate() + horizon);
+          if (d > limit) return true;
+        }
+      }
+      return false;
+    },
+    [restaurant]
+  );
+
+  const createMutation = useMutation({
+    mutationFn: (form: BookingFormData) =>
+      createBooking(
+        slug,
+        { date: dateKey!, time: selectedSlot!, partySize: guests, comment: form.notes },
+        { name: form.name, email: form.email, phone: form.phone },
+        idempotencyKey.current
+      ),
+    onSuccess: ({ booking, warning }) => {
+      rememberBooking(slug, booking.booking_number);
+      queryClient.setQueryData(["booking", slug, booking.booking_number], booking);
+      navigate(`/restaurant/${slug}/reservation/${booking.booking_number}`, {
+        state: { warning, justCreated: true },
+      });
+    },
+    onError: (e: ApiError) => {
+      // La clé a été consommée : nouvelle clé pour la prochaine tentative
+      idempotencyKey.current = crypto.randomUUID();
+      if (e.code === "slot_unavailable") {
+        setSelectedSlot(null);
+        setStep(2);
+        refetchSlots();
+      }
+      toast({ title: "Erreur", description: e.message, variant: "destructive" });
+    },
+  });
+
+  const handleFindTable = useCallback(() => {
     if (!date) return;
-    setLoading(true);
-    // Simulate API call
-    await new Promise((r) => setTimeout(r, 1200));
-    setSlots(MOCK_SLOTS);
     setSelectedSlot(null);
-    setLoading(false);
     setStep(2);
   }, [date]);
 
-  const handleSlotSelect = useCallback((time: string) => {
-    setSelectedSlot(time);
-  }, []);
-
   const handleConfirmSlot = useCallback(() => {
-    if (selectedSlot) setStep(3);
+    if (!selectedSlot) return;
+    idempotencyKey.current = crypto.randomUUID();
+    setStep(3);
   }, [selectedSlot]);
 
   const handleBack = useCallback(() => {
@@ -90,52 +135,34 @@ export default function Index() {
     }
   }, [step]);
 
-  const handleSubmitBooking = useCallback(
-    async (data: BookingFormData) => {
-      if (!date || !selectedSlot) return;
-      setLoading(true);
-      try {
-        const [hours, minutes] = selectedSlot.split(":").map(Number);
-        const bookingDate = new Date(date);
-        bookingDate.setHours(hours, minutes, 0, 0);
-        const startDateUnix = Math.floor(bookingDate.getTime() / 1000);
-
-        const result = await createBooking({
-          customer: {
-            customer_first_name: data.firstName,
-            customer_last_name: data.lastName,
-            customer_email: data.email,
-            customer_tel: data.phone,
-          },
-          booking: {
-            start_date: startDateUnix,
-            party_size: guests,
-            comment: data.notes,
-          },
-        });
-        navigate(`/reservation/${result.booking_number}`);
-      } catch (e: any) {
-        toast({
-          title: "Erreur",
-          description: e.message,
-          variant: "destructive",
-        });
-      } finally {
-        setLoading(false);
-      }
-    },
-    [guests, date, selectedSlot, navigate]
+  const formattedDate = useMemo(
+    () =>
+      date?.toLocaleDateString("fr-FR", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+      }),
+    [date]
   );
 
-  const formattedDate = date?.toLocaleDateString("fr-FR", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  });
+  // ── Restaurant introuvable ──
+  if (restaurantError) {
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="mx-auto max-w-md px-4 py-6">
+          <div className="rounded-xl bg-card p-8 shadow-sm text-center space-y-3">
+            <SearchX className="h-12 w-12 mx-auto text-muted-foreground" />
+            <h2 className="text-xl font-bold text-foreground">Restaurant introuvable</h2>
+            <p className="text-sm text-muted-foreground">{restaurantError.message}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
-      <AnimatePresence>{loading && <Loader />}</AnimatePresence>
+      <AnimatePresence>{createMutation.isPending && <Loader />}</AnimatePresence>
 
       <div className="mx-auto max-w-md px-4 py-6 space-y-6">
         {/* Header */}
@@ -143,153 +170,182 @@ export default function Index() {
           {step > 1 && (
             <button
               onClick={handleBack}
+              aria-label="Retour"
               className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary transition-colors"
             >
               <ArrowLeft className="h-4 w-4" />
             </button>
           )}
           <div className="flex-1">
-            <RestaurantHeader />
+            <RestaurantHeader
+              merchant={restaurant?.merchant}
+              handicapAccess={restaurant?.merchant.handicap_access}
+            />
           </div>
         </div>
 
-        <AnimatePresence mode="wait">
-          {/* ──────── STEP 1 ──────── */}
-          {step === 1 && (
-            <motion.div
-              key="step1"
-              variants={pageVariants}
-              initial="enter"
-              animate="center"
-              exit="exit"
-              transition={{ duration: 0.35 }}
-              className="space-y-6"
-            >
-              <div className="space-y-1 px-1">
-                <h2 className="text-2xl font-extrabold tracking-tight text-foreground">
-                  Réserver une table
-                </h2>
-                <p className="text-sm text-muted-foreground">
-                  Pour une réservation de plus de {maximum_party_size} personnes,
-                  veuillez contacter l'établissement.
-                </p>
-              </div>
-
-              <div className="rounded-xl bg-card p-5 shadow-sm space-y-3">
-                <label className="text-sm font-semibold text-foreground">
-                  Nombre de convives
-                </label>
-                <GuestSelector value={guests} onChange={setGuests} />
-              </div>
-
-              <div className="rounded-xl bg-card p-4 shadow-sm flex justify-center">
-                <Calendar
-                  mode="single"
-                  selected={date}
-                  onSelect={setDate}
-                  disabled={isDisabled}
-                  locale={fr}
-                  className={cn("p-0 pointer-events-auto")}
-                  classNames={{
-                    day_today:
-                      "ring-1 ring-primary/40 text-foreground font-semibold",
-                    day_selected:
-                      "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground",
-                  }}
-                />
-              </div>
-
-              <button
-                disabled={!date}
-                onClick={handleFindTable}
-                className={cn(
-                  "w-full rounded-xl py-3.5 text-sm font-bold transition-all shadow-sm",
-                  date
-                    ? "bg-primary text-primary-foreground hover:opacity-90 active:scale-[0.98]"
-                    : "bg-muted text-muted-foreground cursor-not-allowed"
-                )}
+        {restaurantLoading ? (
+          <div className="space-y-6">
+            <div className="space-y-2 px-1">
+              <Skeleton className="h-8 w-2/3" />
+              <Skeleton className="h-4 w-full" />
+            </div>
+            <div className="rounded-xl bg-card p-5 shadow-sm">
+              <Skeleton className="h-16 w-full" />
+            </div>
+            <div className="rounded-xl bg-card p-4 shadow-sm">
+              <Skeleton className="h-72 w-full" />
+            </div>
+          </div>
+        ) : restaurant ? (
+          <AnimatePresence mode="wait">
+            {/* ──────── STEP 1 : Date & convives ──────── */}
+            {step === 1 && (
+              <motion.div
+                key="step1"
+                variants={pageVariants}
+                initial="enter"
+                animate="center"
+                exit="exit"
+                transition={{ duration: 0.35 }}
+                className="space-y-6"
               >
-                {date
-                  ? `Trouver une table — ${formattedDate}`
-                  : "Sélectionnez une date"}
-              </button>
-            </motion.div>
-          )}
+                <div className="space-y-1 px-1">
+                  <h2 className="text-2xl font-extrabold tracking-tight text-foreground">
+                    Réserver une table
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    Pour une réservation de plus de {maxGuests} personnes, veuillez contacter
+                    l'établissement.
+                  </p>
+                </div>
 
-          {/* ──────── STEP 2 ──────── */}
-          {step === 2 && (
-            <motion.div
-              key="step2"
-              variants={pageVariants}
-              initial="enter"
-              animate="center"
-              exit="exit"
-              transition={{ duration: 0.35 }}
-              className="space-y-6"
-            >
-              <div className="space-y-1 px-1">
-                <h2 className="text-2xl font-extrabold tracking-tight text-foreground">
-                  Choisissez un horaire
-                </h2>
-                <p className="text-sm text-muted-foreground">
-                  Pour {guests} personne{guests > 1 ? "s" : ""} le{" "}
-                  {formattedDate}. Les réservations sont d'une durée de{" "}
-                  {merchant.default_booking_duration} min.
-                </p>
-              </div>
+                <div className="rounded-xl bg-card p-5 shadow-sm space-y-3">
+                  <label className="text-sm font-semibold text-foreground">
+                    Nombre de convives
+                  </label>
+                  <GuestSelector value={guests} onChange={setGuests} min={minGuests} max={maxGuests} />
+                </div>
 
-              <div className="rounded-xl bg-card p-5 shadow-sm">
-                <TimeSlotSelector
-                  slots={slots}
-                  selected={selectedSlot}
-                  onSelect={handleSlotSelect}
-                />
-              </div>
+                <div className="rounded-xl bg-card p-4 shadow-sm flex justify-center">
+                  <Calendar
+                    mode="single"
+                    selected={date}
+                    onSelect={setDate}
+                    disabled={isDisabledDay}
+                    locale={fr}
+                    className={cn("p-0 pointer-events-auto")}
+                    classNames={{
+                      day_today: "ring-1 ring-primary/40 text-foreground font-semibold",
+                      day_selected:
+                        "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground",
+                    }}
+                  />
+                </div>
 
-              <button
-                disabled={!selectedSlot}
-                onClick={handleConfirmSlot}
-                className={cn(
-                  "w-full rounded-xl py-3.5 text-sm font-bold transition-all shadow-sm",
-                  selectedSlot
-                    ? "bg-primary text-primary-foreground hover:opacity-90 active:scale-[0.98]"
-                    : "bg-muted text-muted-foreground cursor-not-allowed"
-                )}
+                <button
+                  disabled={!date}
+                  onClick={handleFindTable}
+                  className={cn(
+                    "w-full rounded-xl py-3.5 text-sm font-bold transition-all shadow-sm",
+                    date
+                      ? "bg-primary text-primary-foreground hover:opacity-90 active:scale-[0.98]"
+                      : "bg-muted text-muted-foreground cursor-not-allowed"
+                  )}
+                >
+                  {date ? `Trouver une table — ${formattedDate}` : "Sélectionnez une date"}
+                </button>
+              </motion.div>
+            )}
+
+            {/* ──────── STEP 2 : Horaires ──────── */}
+            {step === 2 && (
+              <motion.div
+                key="step2"
+                variants={pageVariants}
+                initial="enter"
+                animate="center"
+                exit="exit"
+                transition={{ duration: 0.35 }}
+                className="space-y-6"
               >
-                {selectedSlot
-                  ? `Continuer — ${selectedSlot}`
-                  : "Sélectionnez un horaire"}
-              </button>
-            </motion.div>
-          )}
+                <div className="space-y-1 px-1">
+                  <h2 className="text-2xl font-extrabold tracking-tight text-foreground">
+                    Choisissez un horaire
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    Pour {guests} personne{guests > 1 ? "s" : ""} le {formattedDate}.
+                  </p>
+                </div>
 
-          {/* ──────── STEP 3 ──────── */}
-          {step === 3 && (
-            <motion.div
-              key="step3"
-              variants={pageVariants}
-              initial="enter"
-              animate="center"
-              exit="exit"
-              transition={{ duration: 0.35 }}
-              className="space-y-6"
-            >
-              <div className="space-y-1 px-1">
-                <h2 className="text-2xl font-extrabold tracking-tight text-foreground">
-                  Vos coordonnées
-                </h2>
-                <p className="text-sm text-muted-foreground">
-                  {guests} personne{guests > 1 ? "s" : ""} · {formattedDate} ·{" "}
-                  {selectedSlot}
-                </p>
-              </div>
+                <div className="rounded-xl bg-card p-5 shadow-sm">
+                  {slotsLoading ? (
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+                      {Array.from({ length: 8 }).map((_, i) => (
+                        <Skeleton key={i} className="h-11 rounded-xl" />
+                      ))}
+                    </div>
+                  ) : slotsError ? (
+                    <div className="text-center py-6 space-y-3">
+                      <p className="text-sm text-muted-foreground">{slotsError.message}</p>
+                      <Button variant="outline" size="sm" onClick={() => refetchSlots()}>
+                        Réessayer
+                      </Button>
+                    </div>
+                  ) : (
+                    <TimeSlotSelector
+                      slots={slots ?? []}
+                      selected={selectedSlot}
+                      onSelect={setSelectedSlot}
+                    />
+                  )}
+                </div>
 
-              <div className="rounded-xl bg-card p-5 shadow-sm">
-                <BookingForm onSubmit={handleSubmitBooking} />
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+                <button
+                  disabled={!selectedSlot}
+                  onClick={handleConfirmSlot}
+                  className={cn(
+                    "w-full rounded-xl py-3.5 text-sm font-bold transition-all shadow-sm",
+                    selectedSlot
+                      ? "bg-primary text-primary-foreground hover:opacity-90 active:scale-[0.98]"
+                      : "bg-muted text-muted-foreground cursor-not-allowed"
+                  )}
+                >
+                  {selectedSlot ? `Continuer — ${selectedSlot}` : "Sélectionnez un horaire"}
+                </button>
+              </motion.div>
+            )}
+
+            {/* ──────── STEP 3 : Coordonnées ──────── */}
+            {step === 3 && (
+              <motion.div
+                key="step3"
+                variants={pageVariants}
+                initial="enter"
+                animate="center"
+                exit="exit"
+                transition={{ duration: 0.35 }}
+                className="space-y-6"
+              >
+                <div className="space-y-1 px-1">
+                  <h2 className="text-2xl font-extrabold tracking-tight text-foreground">
+                    Vos coordonnées
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    {guests} personne{guests > 1 ? "s" : ""} · {formattedDate} · {selectedSlot}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-card p-5 shadow-sm">
+                  <BookingForm
+                    onSubmit={(data) => createMutation.mutate(data)}
+                    isSubmitting={createMutation.isPending}
+                  />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        ) : null}
       </div>
     </div>
   );
