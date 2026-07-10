@@ -12,6 +12,7 @@ import { GuestSelector } from "@/components/GuestSelector";
 import { TimeSlotSelector } from "@/components/TimeSlotSelector";
 import { BookingForm, type BookingFormData } from "@/components/BookingForm";
 import { FindBooking } from "@/components/FindBooking";
+import { Stepper } from "@/components/Stepper";
 import { WaitlistSheet } from "@/components/WaitlistSheet";
 import { Loader } from "@/components/Loader";
 import { cn } from "@/lib/utils";
@@ -187,6 +188,8 @@ export default function Index() {
             />
           </div>
         </div>
+
+        {restaurant && <Stepper current={step} />}
 
         {restaurantLoading ? (
           <div className="space-y-6">
