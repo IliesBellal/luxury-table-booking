@@ -26,7 +26,7 @@ export function FindBooking({ slug }: FindBookingProps) {
   const remembered = useMemo(() => getRememberedBookings(slug), [slug]);
 
   function goTo(bookingNumber: string) {
-    navigate(`/restaurant/${slug}/reservation/${encodeURIComponent(bookingNumber.trim())}`);
+    navigate(`/restaurant/${slug}/booking/${encodeURIComponent(bookingNumber.trim())}`);
   }
 
   function handleSubmit(ev: React.FormEvent) {

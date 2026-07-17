@@ -18,7 +18,7 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/restaurant/:slug" element={<Index />} />
-          <Route path="/restaurant/:slug/reservation/:bookingNumber" element={<Reservation />} />
+          <Route path="/restaurant/:slug/booking/:bookingNumber" element={<Reservation />} />
           <Route path="/restaurant/:slug/attente/:token" element={<Waitlist />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />

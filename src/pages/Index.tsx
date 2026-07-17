@@ -102,7 +102,7 @@ export default function Index() {
     onSuccess: ({ booking, warning }) => {
       rememberBooking(slug, booking.booking_number);
       queryClient.setQueryData(["booking", slug, booking.booking_number], booking);
-      navigate(`/restaurant/${slug}/reservation/${booking.booking_number}`, {
+      navigate(`/restaurant/${slug}/booking/${booking.booking_number}`, {
         state: { warning, justCreated: true },
       });
     },
